@@ -3,10 +3,9 @@
 Created on 10 December 2023
 
 @author: Julien Gautier (LOA)
-last modified 15 decembre 2023
+last modified 2024/02/05
 """
 
-#%%Import
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QWidget, QMessageBox, QLineEdit, QToolButton
@@ -28,7 +27,6 @@ from scanMotor import SCAN
 __version__=__init__.__version__
 
 
-
 class ONEMOTORGUI(QWidget) :
     """
     User interface Motor class : 
@@ -40,6 +38,7 @@ class ONEMOTORGUI(QWidget) :
         ShowRef = True see the reference windows
         unit : 0: step 1: um 2: mm 3: ps 4: °
         jogValue : Value in unit of the jog
+    database is update when closing
     """
 
     def __init__(self, IpAdress, NoMotor, nomWin='', showRef=False, unit=1, jogValue=100, parent=None):
@@ -50,7 +49,7 @@ class ONEMOTORGUI(QWidget) :
         sepa = os.sep
         self.icon = str(p.parent) + sepa + 'icons' +sepa
         self.isWinOpen = False
-        
+        self.nomWin = nomWin
         self.refShowId = showRef
         self.indexUnit = unit
         self.jogValue = jogValue
@@ -76,7 +75,11 @@ class ONEMOTORGUI(QWidget) :
         self.iconStop = self.icon+"close.PNG"
         self.iconStop = pathlib.Path(self.iconStop)
         self.iconStop = pathlib.PurePosixPath(self.iconStop)
-    
+
+        self.iconUpdate = self.icon +"recycle.PNG"
+        self.iconUpdate = pathlib.Path(self.iconUpdate)
+        self.iconUpdate = pathlib.PurePosixPath(self.iconUpdate)
+
         self.MOT[0]=moteurRSAIFDB.MOTORRSAI(self.IpAdress,self.NoMotor)
             
         self.scanWidget=SCAN(MOT=self.MOT[0]) # for the scan
@@ -85,23 +88,12 @@ class ONEMOTORGUI(QWidget) :
         self.butePos = [0,0,0]
         self.buteNeg = [0,0,0]
         self.name = [0,0,0]
-        
         for zzi in range(0,1):
-            
             self.stepmotor[zzi] = float(1/(self.MOT[0].getStepValue())) # list of stepmotor values for unit conversion
             self.butePos[zzi] = float(self.MOT[0].getButLogPlusValue()) # list 
             self.buteNeg[zzi] = float(self.MOT[0].getButLogMoinsValue())
             self.name[zzi] = str(self.MOT[0].getName())
-        
-        self.setWindowTitle(nomWin + str(self.MOT[0].getEquipementName()) + ' ('+ str(self.IpAdress)+ ')  '+ ' [M'+ str(self.NoMotor) + ']  ' + self.name[0]     )
-        
-        self.thread = PositionThread(self,mot=self.MOT[0]) # thread for displaying position
-        self.thread.POS.connect(self.Position)
-        self.thread.ETAT.connect(self.Etat)
-        
-        
-        
-        ## initialisation of the jog value 
+                ## initialisation of the jog value 
         if self.indexUnit == 0: #  step
             self.unitChange = 1
             self.unitName = 'step'
@@ -117,18 +109,61 @@ class ONEMOTORGUI(QWidget) :
             self.unitName = 'ps'
         if self.indexUnit == 4: #  en degres
             self.unitChange = 1 *self.stepmotor[0]
-            self.unitName = '°'    
+            self.unitName = '°'  
+
+        self.thread = PositionThread(self,mot=self.MOT[0]) # thread for displaying position
+        self.thread.POS.connect(self.Position)
+        #self.thread.ETAT.connect(self.Etat)
         
         self.setup()
-        
+        self.update()
         self.unit()
         self.jogStep.setValue(self.jogValue)
+        self.actionButton()
+
+    def update(self):
+        # update from the data base 
+        self.MOT[0].update()
+        # to avoid to access to the database 
+        for zzi in range(0,1):
+            self.stepmotor[zzi] = float(1/(self.MOT[0].step)) # list of stepmotor values for unit conversion
+            self.butePos[zzi] = float(self.MOT[0].butPlus) # list 
+            self.buteNeg[zzi] = float(self.MOT[0].butMoins)
+            self.name[zzi] = str(self.MOT[0].name)
+                ## initialisation of the jog value 
         
+        self.setWindowTitle(self.nomWin + str(self.MOT[0].getEquipementName()) + ' ('+ str(self.IpAdress)+ ')  '+ ' [M'+ str(self.NoMotor) + ']  ' + self.name[0] )
+        
+        self.nom.setText(self.name[0])
+        self.refValue = self.MOT[0].refValue
+        self.refName = self.MOT[0].refName
+        iii=0
+        for saveNameButton in self.posText: # reference name
+            saveNameButton.setText(self.refName[iii]) # print  ref name
+            iii+=1   
+        eee=0
+        for absButton in self.absRef: 
+            absButton.setValue(float(self.refValue[eee]/self.unitChange)) # save reference value
+            eee+=1
+
+    def updateDB(self):
+        #  update the Data base 
+        i=1
+        for ref in self.refValue : 
+            self.MOT[0].setRefValue(i,ref/self.stepmotor[0])
+            i+=1
+        i=1
+        for ref in self.refName : 
+            self.MOT[0].setRefName(i,ref)
+            i+=1
+            
+        # self.MOT[0].update()
+
     def startThread2(self):
+        # start position and state thread
         self.thread.ThreadINIT()
         self.thread.start()
         time.sleep(0.1)
-        
         
     def setup(self):
         
@@ -143,23 +178,26 @@ class ONEMOTORGUI(QWidget) :
         self.enPosition.setStyleSheet("font: bold 15pt")
         self.enPosition.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignVCenter)
         hboxTitre.addWidget(self.enPosition)
-        self.butNegButt = QCheckBox('But Neg',self)
+        self.butNegButt = QCheckBox('Log FDC-',self)
         hboxTitre.addWidget(self.butNegButt)
        
-        self.butPosButt = QCheckBox('But Pos',self)
+        self.butPosButt = QCheckBox('Log FDC+',self)
         hboxTitre.addWidget(self.butPosButt)
         vbox1.addLayout(hboxTitre)
-        #vbox1.addSpacing(10)
         
-        hShoot=QHBoxLayout()
+        hShoot = QHBoxLayout()
         self.shootCibleButton = QPushButton('Shot')
         self.shootCibleButton.setStyleSheet("font: 12pt;background-color: red")
         self.shootCibleButton.setMaximumWidth(100)
         self.shootCibleButton.setMinimumWidth(100)
         hShoot.addWidget(self.shootCibleButton)
+        self.updateButton = QToolButton()
+        self.updateButton.setToolTip( "update from DB")
+        self.updateButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: gray;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"%(self.iconUpdate,self.iconUpdate))
+        hShoot.addWidget(self.updateButton)
         vbox1.addLayout(hShoot)
         
-        hbox0=QHBoxLayout()
+        hbox0 = QHBoxLayout()
         self.position = QLabel('1234567')
         self.position.setMaximumWidth(300)
         self.position.setStyleSheet("font: bold 40pt" )
@@ -176,6 +214,7 @@ class ONEMOTORGUI(QWidget) :
         self.unitBouton.setCurrentIndex(self.indexUnit)
         
         self.zeroButton = QPushButton('Zero')
+        self.zeroButton.setToolTip('set origin')
         self.zeroButton.setMaximumWidth(50)
         
         hbox0.addWidget(self.position)
@@ -193,7 +232,6 @@ class ONEMOTORGUI(QWidget) :
         #self.MoveStep.setStyleSheet("background-color: green")
         
         self.absMvtButton = QToolButton()
-        
         self.absMvtButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: gray;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"%(self.iconPlay,self.iconPlay))
         
         self.absMvtButton.setMinimumHeight(50)
@@ -239,7 +277,7 @@ class ONEMOTORGUI(QWidget) :
         #vbox1.addStretch(10)
         vbox1.addSpacing(10)
         
-        hbox2=QHBoxLayout()
+        hbox2 = QHBoxLayout()
         self.stopButton = QToolButton()
         self.stopButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: gray;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"%(self.iconStop,self.iconStop))
         
@@ -249,7 +287,7 @@ class ONEMOTORGUI(QWidget) :
         self.stopButton.setMinimumHeight(70)
         self.stopButton.setMinimumWidth(70)
         hbox2.addWidget(self.stopButton)
-        vbox2=QVBoxLayout()
+        vbox2 = QVBoxLayout()
         
         self.showRef = QPushButton('Show Ref')
         self.showRef.setMaximumWidth(90)
@@ -288,8 +326,6 @@ class ONEMOTORGUI(QWidget) :
         self.posText = [self.REF1.posText,self.REF2.posText,self.REF3.posText,self.REF4.posText,self.REF5.posText,self.REF6.posText]
         self.POS = [self.REF1.Pos,self.REF2.Pos,self.REF3.Pos,self.REF4.Pos,self.REF5.Pos,self.REF6.Pos]
         self.Take = [self.REF1.take,self.REF2.take,self.REF3.take,self.REF4.take,self.REF5.take,self.REF6.take]
-        
-        self.actionButton()
         self.jogStep.setFocus()
         self.refShow()
         
@@ -300,38 +336,39 @@ class ONEMOTORGUI(QWidget) :
         self.unitBouton.currentIndexChanged.connect(self.unit) #  unit change
         self.absMvtButton.clicked.connect(self.MOVE)
         self.plus.clicked.connect(self.pMove) # jog + foc
-        self.plus.setAutoRepeat(False)
-        self.moins.clicked.connect(self.mMove)# jog - fo
-        self.moins.setAutoRepeat(False) 
+        self.plus.setAutoRepeat(True)
+        self.moins.clicked.connect(self.mMove)# jog - foc
+        self.moins.setAutoRepeat(True) 
         self.scan.clicked.connect(lambda:self.open_widget(self.scanWidget) )    
         self.zeroButton.clicked.connect(self.Zero) # reset display to 0
         #self.refZeroButton.clicked.connect(self.RefMark) # todo
         self.stopButton.clicked.connect(self.StopMot)#stop motors 
         self.showRef.clicked.connect(self.refShow) # show references widgets
         self.shootCibleButton.clicked.connect(self.ShootAct)
-        iii = 1
+        iii = 0
         for saveNameButton in self.posText: # reference name
             saveNameButton.textChanged.connect(self.savName)
-            saveNameButton.setText(self.MOT[0].getRefName(iii)) # print  ref name
+            saveNameButton.setText(self.refName[iii]) # print  ref name
             iii+=1   
 
         for posButton in self.POS: # button GO
             posButton.clicked.connect(self.ref)    # go to reference value
-        eee = 1   
+        eee = 0  
         for absButton in self.absRef: 
             nbRef = str(eee)
-            absButton.setValue(float(self.MOT[0].getRefValue(eee)/self.unitChange)) # save reference value
+            absButton.setValue(float(self.refValue[eee]/self.unitChange)) # save reference value
             absButton.editingFinished.connect(self.savRef) # sauv value
             eee+=1
        
         for takeButton in self.Take:
             takeButton.clicked.connect(self.take) # take the value 
         
+        self.updateButton.clicked.connect(self.update)
+
     def open_widget(self,fene):
         
         """ open new widget 
         """
-        
         if fene.isWinOpen is False:
             #New widget"
             fene.show()
@@ -449,10 +486,10 @@ class ONEMOTORGUI(QWidget) :
         self.jogStep.setValue(valueJog/self.unitChange)
         self.MoveStep.setSuffix(" %s" % self.unitName)
 
-        eee=1
-        for absButton in self.absRef: 
-            nbRef = str(eee)
-            absButton.setValue(float(self.MOT[0].getRefValue(nbRef))/self.unitChange)
+        eee=0
+        for absButton in self.absRef: # change the value of reference 
+            nbRef = eee
+            absButton.setValue(float(self.refValue[nbRef])/self.unitChange)
             absButton.setSuffix(" %s" % self.unitName)
             eee+=1
         
@@ -468,13 +505,13 @@ class ONEMOTORGUI(QWidget) :
         ''' 
         Position  display read from the second thread
         '''
-        print(Posi)
+        
         Pos=Posi[0]
         self.etat=str(Posi[1])
         a = float(Pos)
-        b=a # value in step
-        a=a/self.unitChange # value with unit changed
-        
+        b = a # value in step
+        a = a/self.unitChange # value with unit changed
+        #print(a,self.etat)
         if self.etat == 'FDC-':
             self.enPosition.setText('FDC -')
             self.enPosition.setStyleSheet('font: bold 28pt;color:red')
@@ -487,26 +524,26 @@ class ONEMOTORGUI(QWidget) :
             self.enPosition.setText('Power Off')
             self.enPosition.setStyleSheet('font: bold 14pt;color:red')
         elif self.etat=='mvt' :
-             self.enPosition.setText('Moving...')
+             self.enPosition.setText('Mvt...')
              self.enPosition.setStyleSheet('font: bold 28pt;color:white')
 
-        if moteurRSAIFDB.rEquipmentStatus(self.IpAdress) == -1 :
-            self.enPosition.setText('Rack not connected')
-            self.enPosition.setStyleSheet('font: bold 14pt;color:red')
+        # if moteurRSAIFDB.rEquipmentStatus(self.IpAdress) == -1 :
+        #     self.enPosition.setText('Rack not connected')
+        #     self.enPosition.setStyleSheet('font: bold 14pt;color:red')
 
         self.position.setText(str(round(a,2))) 
         self.position.setStyleSheet('font: bold 40pt;color:white')
             
         positionConnue = 0 # 
         precis = 5 # to show position name
-        if positionConnue==0 and (self.etat == 'ok' or self.etat == '?'):
+        if (self.etat == 'ok' or self.etat == '?'):
             for nbRefInt in range(1,7):
-                nbRef=str(nbRefInt)
-                if float(self.MOT[0].getRefValue(nbRef))-precis<b< float(self.MOT[0].getRefValue(nbRef))+precis:
-                    self.enPosition.setText(str(self.MOT[0].getRefName(nbRef)))
-                    positionConnue=1
+                if positionConnue == 0 :
+                    if float(self.refValue[nbRefInt-1]) - precis <b < float(self.refValue[nbRefInt-1]) + precis: #self.MOT[0].getRefValue
+                        self.enPosition.setText(str(self.refName[nbRefInt-1]))
+                        positionConnue = 1   
         if positionConnue==0 and (self.etat == 'ok' or self.etat == '?'):
-            self.enPosition.setText('?' ) 
+            self.enPosition.setText(' ' ) 
         
     def Etat(self,etat):
         # return  motor state  
@@ -522,9 +559,8 @@ class ONEMOTORGUI(QWidget) :
         
         reply=QMessageBox.question(None,'Save Position ?',"Do you want to save this position ?",QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-               tpos=float(self.MOT[0].position())
-               
-               self.MOT[0].setRefValue(nbRef,tpos)
+               tpos = float(self.MOT[0].position())
+               self.refValue[int(nbRef)-1] = tpos 
                self.absRef[int(nbRef)-1].setValue(tpos/self.unitChange)
                print ("Position saved",tpos)
                
@@ -537,7 +573,7 @@ class ONEMOTORGUI(QWidget) :
         if reply == QMessageBox.StandardButton.Yes:
             nbRef=str(sender.objectName()[0])
             for i in range (0,1):
-                vref=int(self.MOT[i].getRefValue(nbRef))
+                vref=int(self.refValue[int(nbRef)-1]) # 
                 if vref<self.buteNeg[i] :
                     print( "STOP : negative switch")
                     self.butNegButt.setChecked(True)
@@ -557,9 +593,11 @@ class ONEMOTORGUI(QWidget) :
         '''
         sender=QtCore.QObject.sender(self)
         nbRef=sender.objectName()[0] #PosTExt1
+        
         vname=self.posText[int(nbRef)-1].text()
         for i in range (0,1):
-            self.MOT[i].setRefName(nbRef,str(vname))
+            
+            self.refName[int(nbRef)-1] = str(vname)
 
     def savRef (self) :
         '''
@@ -569,8 +607,9 @@ class ONEMOTORGUI(QWidget) :
         nbRef=sender.objectName()[0] # nom du button ABSref1
         
         vref=int(self.absRef[int(nbRef)-1].value())*self.unitChange
-        self.MOT[0].setRefValue(nbRef,vref) # on sauvegarde en step 
-           
+        self.refValue[int(nbRef)-1] = vref  # on sauvegarde en step 
+        
+
     def ShootAct(self):
         try: 
             self.tir.TirAct()  
@@ -581,7 +620,7 @@ class ONEMOTORGUI(QWidget) :
         When closing the window
         """
         self.fini()
-        time.sleep(0.1)
+        time.sleep(0.2)
         event.accept()
         
     def fini(self): 
@@ -590,11 +629,14 @@ class ONEMOTORGUI(QWidget) :
         '''
         self.thread.stopThread()
         self.isWinOpen=False
-        time.sleep(0.1)    
-        moteurRSAIFDB.closeConnection()
+        time.sleep(0.2)  
+        self.updateDB()
 
         if self.scanWidget.isWinOpen==True:
             self.scanWidget.close()
+        #moteurRSAIFDB.closeConnection()
+
+        
         
 class REF1M(QWidget):
     
@@ -671,17 +713,16 @@ class REF1M(QWidget):
 
 class PositionThread(QtCore.QThread):
     '''
-    Secon thread  to display the position
+    Second thread  to display the position
     '''
     import time 
     POS=QtCore.pyqtSignal(object) # signal of the second thread to main thread  to display motors position
     ETAT=QtCore.pyqtSignal(str)
+
     def __init__(self,parent=None,mot='',):
         super(PositionThread,self).__init__(parent)
         self.MOT=mot
-        
         self.parent=parent
-        
         self.stop=False
 
     def run(self):
@@ -695,21 +736,24 @@ class PositionThread(QtCore.QThread):
                 
                 try :
                     etat = self.MOT.etatMotor()
+                    
                     time.sleep(0.1)
                     self.POS.emit([Posi,etat])
                     time.sleep(0.1)
+                
+                    # if etat=="mvt":
+                    #     print(etat)
+
                 except:
                     print('error emit')
                   
-                
-                
     def ThreadINIT(self):
         self.stop=False   
                         
     def stopThread(self):
         self.stop=True
         time.sleep(0.1)
-        self.terminate()
+        #self.terminate()
         
 
 if __name__ == '__main__':

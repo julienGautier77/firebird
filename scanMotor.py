@@ -9,7 +9,7 @@ Created on Mon Apr 22 20:23:31 2019
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QWidget,QMessageBox
-from PyQt6.QtWidgets import QVBoxLayout,QHBoxLayout,QPushButton,QGridLayout,QDoubleSpinBox
+from PyQt6.QtWidgets import QVBoxLayout,QHBoxLayout,QPushButton,QGridLayout,QDoubleSpinBox,QProgressBar
 from PyQt6.QtWidgets import QComboBox,QLabel
 from PyQt6.QtGui import QIcon
 
@@ -45,7 +45,7 @@ class SCAN(QWidget):
             self.motor='test'
             self.name="dummy motor"
             self.setWindowTitle('Scan  : '+self.name)
-            self.stepmotor=1
+            self.stepmotor = 1
         
         self.setup()
         self.actionButton()
@@ -83,7 +83,8 @@ class SCAN(QWidget):
         
         hboxTitre.addWidget(lab_nbStepRemain)
         hboxTitre.addWidget(self.val_nbStepRemain)
-        
+        self.progressBar = QProgressBar()
+        hboxTitre.addWidget(self.progressBar)
         hboxTitre.addSpacing(100)
         
         
@@ -217,19 +218,20 @@ class SCAN(QWidget):
         self.but_stop.setEnabled(False)
         self.but_stop.setStyleSheet("border-radius:20px;background-color: red")
         
-    def Remain(self,nbstepdone)   :
-        print('remain',nbstepdone,self.nbStep)
+    def Remain(self,nbstepdone,nbMax)   :
+        self.val_nbStepRemain.setText(str((nbstepdone)))
+        self.progressBar.setMaximum(int(nbMax))
+        self.progressBar.setValue(nbMax-nbstepdone)
         
-        self.val_nbStepRemain.setText(str((self.nbStep*self.val_nbShoot)-nbstepdone))
-        
-        if self.nbStep*self.val_nbShoot==nbstepdone:
-            print ('fin scan')
+        if nbstepdone == 0 :
+            print ('fin scan remain')
+            self.val_nbStepRemain.setText('scan done')
             self.stopScan()
             
     def RemainShoot(self, nbstepdone)   :
-        print('remain shoot', nbstepdone, self.nbStep)
+        #print('remain shoot', nbstepdone, self.nbStep)
         
-        self.val_nbStepRemain.setText(str((self.val_nbShoot)-nbstepdone))
+        self.val_nbStepRemain.setText(str((nbstepdone)))
         
         if self.val_nbShoot == nbstepdone:
             print ('fin scan multi shoot')
@@ -335,39 +337,22 @@ class ThreadShoot(QtCore.QThread):
         
 class ThreadScan(QtCore.QThread):
    
-    nbRemain = QtCore.pyqtSignal(float)
+    nbRemain = QtCore.pyqtSignal(int,int)
     
     def __init__(self, parent=None):
         super(ThreadScan,self).__init__(parent)
         self.parent = parent
         self.stop=False
         date=time.strftime("%Y_%m_%d_%H_%M_%S")
-        fileNameLog='logScanMotor_'+date+'.log'
-        
-        # self.handler_scan= logging.FileHandler(fileNameLog, mode="a", encoding="utf-8")
-        # # self.handler_scan.setFormatter('%(asctime)s %(message)s')
-        # self.logger = logging.getLogger("Scan")
-        # self.logger.setLevel(logging.INFO)
-        # self.logger.addHandler(self.handler_scan)
 
     def run(self):
         
         self.stop=False
-        self.logger.info('')
-        self.logger.info('')
-        self.logger.info('Start Scan')
-        self.logger.info(str('number of steps:  '+ str(self.parent.nbStep) ))
-        self.logger.info(str('Initial position:  ' + str(self.parent.vInit)+ str(self.parent.unitName)))
-        self.logger.info(str('final position:  '+ str(self.parent.vFin)+str(self.parent.unitName)))
-        self.logger.info(str('step value:  '+str(self.parent.vStep)+str(self.parent.unitName)))
-        self.logger.info(str('nb of shoot for one postion:  '+str(self.parent.val_nbTir.value())))
         
         self.vini = self.parent.vInit*self.parent.unitChange
         self.vfin = self.parent.vFin*self.parent.unitChange
         self.step = self.parent.vStep*self.parent.unitChange
-        
         self.val_time = self.parent.val_time.value()
-        print('timeouts',self.val_time)
         self.parent.MOT.move(self.vini)
         
         b=self.parent.MOT.position()
@@ -378,9 +363,8 @@ class ThreadScan(QtCore.QThread):
                 time.sleep(1)
                 b=self.parent.MOT.position()
         time.sleep(0.5)
-        print(self.vini,self.vfin,self.step)
         movement = np.arange(self.vini+self.step,self.vfin+self.step,self.step)
-        print (movement,"start scan",self.parent.unitChange)
+        nbTotShot = np.size(movement)*self.parent.val_nbTir.value()
         nb = 0
         for mv in movement:
             
@@ -396,35 +380,25 @@ class ThreadScan(QtCore.QThread):
                         break
                     else :
                         b=self.parent.MOT.position()
-                        print (b,mv)
-                        if b == mv:
-                            self.logger.info('position reached '+ str(b))
+                        time.sleep(0.1)
+                        precis = 1
+                        if b == mv :
                             print( "position reached", str(b))
                             break
                 
                 for nu in range (0,int(self.parent.val_nbTir.value())):
                     nb+=1
                     print('tir')
-                    self.logger.info('Shoot')
                     a = tirSJ.Tir()
-                    print(a)
+                    print('shot' )
                     if a==0 or a=="":
                         print('error shoot')
-                        # msg = QMessageBox(self.parent)
-                        
-                        # msg.setText("Not connected !")
-                        
-                        # msg.setWindowTitle("Warning ...")
-                        # msg.setWindowFlags(QtCore.Qt.WindowType.WindowStaysOnTopHint)
-                        # msg.exec()
-                        
+                    self.nbRemain.emit(int(nbTotShot-nb),int(nbTotShot))
                     print('wait',self.val_time)
                     time.sleep(self.val_time)
         print ("fin du scan")
-        self.logger.info('end of scan')
-        self.logger.info('  ')
-        self.logger.info('  ')
         self.parent.stopScan()
+
     def stopThread(self):
         self.stop=True
         print( "stop thread" )  
