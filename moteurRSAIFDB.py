@@ -64,7 +64,9 @@ def listProgConnected():
     nbProgConnected = len(SoftName)
     return nbProgConnected, SoftName, HostName, IpProgram
 
-if listProgConnected()[1][0] != 'PilMotServer':
+if  'PilMotServer' in listProgConnected()[1]:
+    print('server RSAI connected')
+else :
     print('Server RSAI not launched')
     appli = QApplication(sys.argv)
     msg = QMessageBox()
